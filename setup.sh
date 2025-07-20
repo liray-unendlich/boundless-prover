@@ -353,6 +353,9 @@ mkdir -p /data/minio
 echo
 
 echo "-----Starting dependencies services-----"
+supervisord -c /etc/supervisor/supervisord.conf
+supervisord -c /etc/supervisor/conf.d/boundless.conf
+
 supervisorctl update
 supervisorctl start dependencies:*
 supervisorctl status
