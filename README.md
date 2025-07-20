@@ -9,19 +9,19 @@ English | [中文](https://github.com/walirt/boundless-prover/blob/main/README_z
     ```bash
     apt update 
     apt install -y curl
-    curl -L "https://raw.githubusercontent.com/walirt/boundless-prover/refs/heads/main/setup.sh" -o setup.sh
+    curl -L "https://raw.githubusercontent.com/liray-unendlich/boundless-prover/refs/heads/main/setup.sh" -o setup.sh
     bash setup.sh
     ```
 
 2. Select the GPU IDs you want to use, separated by commas, for example
-![](https://github.com/walirt/boundless-prover/blob/main/1.png?raw=true)
+![](https://github.com/liray-unendlich/boundless-prover/blob/main/1.png?raw=true)
     ```bash
     0   # Use GPU with ID 0
     0,1 # Use GPU with ID 0 and 1
     ```
 
 3. Select the networks you want to join, separated by commas, for example
-![](https://github.com/walirt/boundless-prover/blob/main/2.png?raw=true)
+![](https://github.com/liray-unendlich/boundless-prover/blob/main/2.png?raw=true)
     ```bash
     1   # Join the Eth Sepolia testnet
     1,2 # Join the Eth Sepolia and Base Sepolia testnet
