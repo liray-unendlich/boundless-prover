@@ -1,5 +1,27 @@
 #!/bin/bash
 
+SILENT_MODE=false
+SKIP_CLI_TOOLS=false
+while getopts "sc" opt; do
+    case $opt in
+        s)
+            SILENT_MODE=true
+            echo "正在使用静默模式运行，使用默认值..."
+            ;;
+        c)
+            SKIP_CLI_TOOLS=true
+            echo "跳过CLI工具安装..."
+            ;;
+        \?)
+            echo "无效选项: -$OPTARG" >&2
+            echo "用法: $0 [-s] [-c]"
+            echo "  -s: 静默模式（使用默认值，无需输入提示）"
+            echo "  -c: 跳过CLI工具安装"
+            exit 1
+            ;;
+    esac
+done
+
 apt update
 apt install -y curl nvtop git supervisor build-essential pkg-config libssl-dev python3-dev
 echo
@@ -13,6 +35,7 @@ echo "-----正在安装rzup和RISC Zero工具链-----"
 curl -L https://risczero.com/install | bash
 source $HOME/.bashrc
 /root/.risc0/bin/rzup install
+/root/.risc0/bin/rzup install risc0-groth16
 echo
 
 echo "-----正在安装bento组件-----"
@@ -27,31 +50,26 @@ echo
 
 echo "-----正在下载Prover二进制文件-----"
 mkdir /app
-curl -L "https://zzno.de/boundless/agent" -o /app/agent
-curl -L "https://zzno.de/boundless/broker" -o /app/broker
-curl -L "https://zzno.de/boundless/prover" -o /app/prover
-curl -L "https://zzno.de/boundless/rest_api" -o /app/rest_api
-curl -L "https://zzno.de/boundless/stark_verify" -o /app/stark_verify
-curl -L "https://zzno.de/boundless/stark_verify.cs" -o /app/stark_verify.cs
-curl -L "https://zzno.de/boundless/stark_verify.dat" -o /app/stark_verify.dat
-curl -L "https://zzno.de/boundless/stark_verify_final.pk.dmp" -o /app/stark_verify_final.pk.dmp
+
+curl -L "https://zzno.de/boundless/v1.0.0/broker" -o /app/broker
+curl -L "https://zzno.de/boundless/v1.0.0/broker-stress" -o /app/broker-stress
+curl -L "https://zzno.de/boundless/v1.0.0/bento-agent-cuda12_8" -o /app/agent
+curl -L "https://zzno.de/boundless/v1.0.0/bento-rest-api" -o /app/rest_api
+curl -L "https://zzno.de/boundless/v1.0.0/bento-cli" -o /root/.cargo/bin/bento_cli
 
 chmod +x /app/agent
 chmod +x /app/broker
-chmod +x /app/prover
+chmod +x /app/broker-stress
 chmod +x /app/rest_api
-chmod +x /app/stark_verify
+chmod +x /root/.cargo/bin/bento_cli
 
 echo "-----正在验证/app文件sha256sum-----"
 declare -A FILES_SHA256
-FILES_SHA256["/app/agent"]="b3b7c69f696eeff13c9f5027fafdd65ea98cc0639c9bfdea84699b93f79371b3"
-FILES_SHA256["/app/broker"]="fb4f3408e8ecac3575b1a51a2aa7eb930f67ba870ee16e0892ac9f40f0f2487f"
-FILES_SHA256["/app/prover"]="d4507413897a37c28699f2f318731ca9ec4784ece69bdf5f1f224bd87ab8f119"
-FILES_SHA256["/app/rest_api"]="180a94d5eca85d7213d6c002e677a6a491d7dcd439ef0543c8435227dd99546d"
-FILES_SHA256["/app/stark_verify"]="7dc5321854d41d9d3ff3da651503fe405082c03c80d68c5f5186b5e77673f58c"
-FILES_SHA256["/app/stark_verify.cs"]="0670f7c8ce8fe757d0cf4808c5d5cd92c85ac7a96ea98170c2f6f756d49e80b5"
-FILES_SHA256["/app/stark_verify.dat"]="7832c9694eed855a5bdb120e972cce402a133f428513185f97e1bdfdde27a2bc"
-FILES_SHA256["/app/stark_verify_final.pk.dmp"]="6d76b07e187e3329b1d82498a5f826366c3b2e04fc6d99de3d790248eb1ea71f"
+FILES_SHA256["/app/broker"]="216a792c4bb1444a0ce7a447ea2cad0b24e660601baa49057f77b37ac9f4ad74"
+FILES_SHA256["/app/broker-stress"]="024d916463d8f24fb9d12857b6f1dbdc016f972e8d8b82434804e077e0fe6231"
+FILES_SHA256["/app/agent"]="ca8bf4a59cbd8332a075f0426eea27064b37124a4296664fb26f0b07dfff317a"
+FILES_SHA256["/app/rest_api"]="02a0c87b3bfc1fd738d6714ee24fb32fbcb7887bfe46321c3eed2061c581a87a"
+FILES_SHA256["/root/.cargo/bin/bento_cli"]="7af2fe49f75acf95e06476e55e6a91343c238b0cf5696d1cae80be54fcc17b45"
 
 INTEGRITY_PASS=true
 
@@ -81,16 +99,14 @@ else
 fi
 echo
 
-echo "-----正在安装CLI工具-----"
+echo "-----正在复制配置文件-----"
 git clone https://github.com/boundless-xyz/boundless.git
 cd boundless
-git checkout release-0.12
-git submodule update --init --recursive
-cargo install --locked --git https://github.com/risc0/risc0 bento-client --branch release-2.1 --bin bento_cli
-cargo install --locked boundless-cli
-echo
-
-echo "-----正在复制配置文件-----"
+git checkout v1.0.0
+if [ "$SKIP_CLI_TOOLS" = false ]; then
+    git submodule update --init --recursive
+    cargo install --path crates/boundless-cli --locked boundless-cli
+fi
 cp -rf dockerfiles/grafana/* /etc/grafana/provisioning/
 cp .env.base /app/.env.base
 cp .env.base-sepolia /app/.env.base-sepolia
@@ -99,8 +115,16 @@ echo
 
 echo "-----正在生成supervisord配置文件-----"
 nvidia-smi -L
-read -p "请根据打印的GPU信息输入您需要运行的GPU ID（例如 0,1 ，默认 0）: " GPU_IDS
-GPU_IDS=${GPU_IDS:-0}
+
+if [ "$SILENT_MODE" = true ]; then
+    GPU_IDS=$(nvidia-smi --query-gpu=index --format=csv,noheader | tr '\n' ',' | sed 's/,$//')
+    echo "使用所有可用GPU: $GPU_IDS"
+else
+    read -p "请根据打印的GPU信息输入您需要运行的GPU ID（例如 0,1 ，默认全部）: " GPU_IDS
+    if [ -z "$GPU_IDS" ]; then
+        GPU_IDS=$(nvidia-smi --query-gpu=index --format=csv,noheader | tr '\n' ',' | sed 's/,$//')
+    fi
+fi
 
 gpu_info=$(nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader)
 
@@ -139,22 +163,46 @@ NETWORK_ENVS_FILE["1"]="/app/.env.eth-sepolia"
 NETWORK_ENVS_FILE["2"]="/app/.env.base-sepolia"
 NETWORK_ENVS_FILE["3"]="/app/.env.base"
 
-for id in $(for key in "${!NETWORK_NAMES[@]}"; do echo "$key"; done | sort -n); do
-    echo "$id) ${NETWORK_NAMES[$id]}"
-done
+if [ "$SILENT_MODE" = false ]; then
+    for id in $(for key in "${!NETWORK_NAMES[@]}"; do echo "$key"; done | sort -n); do
+        echo "$id) ${NETWORK_NAMES[$id]}"
+    done
+fi
 
-read -p "请输入您需要运行的网络（例如 1,2 ，默认 1,2）: " NETWORK_IDS
-NETWORK_IDS=${NETWORK_IDS:-1,2}
+if [ "$SILENT_MODE" = true ]; then
+    NETWORK_IDS="3"
+    echo "使用默认网络: $NETWORK_IDS (Base Mainnet)"
+else
+    read -p "请输入您需要运行的网络（例如 1,2,3 ，默认 3）: " NETWORK_IDS
+    NETWORK_IDS=${NETWORK_IDS:-3}
+fi
 
 IFS=',' read -ra NET_IDS <<< "$NETWORK_IDS"
 declare -A NETWORK_RPC
 declare -A NETWORK_PRIVKEY
 
+declare -A DEFAULT_RPC
+DEFAULT_RPC["1"]="https://eth-sepolia.g.alchemy.com/v2/YOUR_API_KEY"
+DEFAULT_RPC["2"]="https://base-sepolia.g.alchemy.com/v2/YOUR_API_KEY"
+DEFAULT_RPC["3"]="https://base-mainnet.g.alchemy.com/v2/YOUR_API_KEY"
+
+DEFAULT_PRIVKEY="0x0000000000000000000000000000000000000000000000000000000000000000"
+
 for NET_ID in "${NET_IDS[@]}"; do
     NET_ID_TRIM=$(echo "$NET_ID" | xargs)
     NETWORK_NAME="${NETWORK_NAMES[$NET_ID_TRIM]}"
-    read -p "请输入${NETWORK_NAME}的RPC地址: " rpc
-    read -p "请输入${NETWORK_NAME}的私钥: " privkey
+    
+    if [ "$SILENT_MODE" = true ]; then
+        rpc="${DEFAULT_RPC[$NET_ID_TRIM]}"
+        privkey="$DEFAULT_PRIVKEY"
+        echo "使用${NETWORK_NAME}的默认RPC: $rpc"
+        echo "使用${NETWORK_NAME}的默认私钥: $privkey"
+        echo "警告：请在启动服务前更新配置文件中的RPC URL和私钥！"
+    else
+        read -p "请输入${NETWORK_NAME}的RPC地址: " rpc
+        read -p "请输入${NETWORK_NAME}的私钥: " privkey
+    fi
+    
     NETWORK_RPC["$NET_ID_TRIM"]="$rpc"
     NETWORK_PRIVKEY["$NET_ID_TRIM"]="$privkey"
 done
@@ -166,7 +214,7 @@ for idx in "${!GPU_IDS_ARRAY[@]}"; do
     GPU_ID_TRIM=$(echo "${GPU_IDS_ARRAY[$idx]}" | xargs)
     GPU_AGENT_CONFIGS+="
 [program:gpu_prove_agent${idx}]
-command=/app/agent -t prove
+command=/app/agent -t prove --redis-ttl 57600
 directory=/app
 autostart=false
 autorestart=true
@@ -213,7 +261,7 @@ strip_ansi=true
 programs=redis,postgres,minio,grafana
 
 [group:bento]
-programs=exec_agent0,exec_agent1,aux_agent,snark_agent,rest_api
+programs=exec_agent0,exec_agent1,aux_agent,rest_api
 
 [group:broker]
 programs=
@@ -268,7 +316,7 @@ redirect_stderr=true
 environment=GF_SECURITY_ADMIN_USER="admin",GF_SECURITY_ADMIN_PASSWORD="admin",GF_LOG_LEVEL="WARN",POSTGRES_HOST="localhost",POSTGRES_DB="taskdb",POSTGRES_PORT="5432",POSTGRES_USER="worker",POSTGRES_PASSWORD="password",GF_INSTALL_PLUGINS="frser-sqlite-datasource"
 
 [program:exec_agent0]
-command=/app/agent -t exec --segment-po2 $MIN_SEGMENT_SIZE
+command=/app/agent -t exec --segment-po2 $MIN_SEGMENT_SIZE --redis-ttl 57600
 directory=/app
 autostart=false
 autorestart=true
@@ -280,7 +328,7 @@ redirect_stderr=true
 environment=DATABASE_URL="postgresql://worker:password@localhost:5432/taskdb",REDIS_URL="redis://localhost:6379",S3_URL="http://localhost:9000",S3_BUCKET="workflow",S3_ACCESS_KEY="admin",S3_SECRET_KEY="password",RUST_LOG="info",RUST_BACKTRACE="1",RISC0_KECCAK_PO2="17"
 
 [program:exec_agent1]
-command=/app/agent -t exec --segment-po2 $MIN_SEGMENT_SIZE
+command=/app/agent -t exec --segment-po2 $MIN_SEGMENT_SIZE --redis-ttl 57600
 directory=/app
 autostart=false
 autorestart=true
@@ -292,7 +340,7 @@ redirect_stderr=true
 environment=DATABASE_URL="postgresql://worker:password@localhost:5432/taskdb",REDIS_URL="redis://localhost:6379",S3_URL="http://localhost:9000",S3_BUCKET="workflow",S3_ACCESS_KEY="admin",S3_SECRET_KEY="password",RUST_LOG="info",RUST_BACKTRACE="1",RISC0_KECCAK_PO2="17"
 
 [program:aux_agent]
-command=/app/agent -t aux --monitor-requeue
+command=/app/agent -t aux --monitor-requeue --redis-ttl 57600
 directory=/app
 autostart=false
 autorestart=true
@@ -302,19 +350,6 @@ priority=50
 stdout_logfile=/var/log/aux_agent.log
 redirect_stderr=true
 environment=DATABASE_URL="postgresql://worker:password@localhost:5432/taskdb",REDIS_URL="redis://localhost:6379",S3_URL="http://localhost:9000",S3_BUCKET="workflow",S3_ACCESS_KEY="admin",S3_SECRET_KEY="password",RUST_LOG="info",RUST_BACKTRACE="1"
-
-[program:snark_agent]
-command=/bin/bash -c "ulimit -s 90000000 && /app/agent -t snark"
-directory=/app
-autostart=false
-autorestart=true
-startsecs=5
-stopwaitsecs=10
-priority=50
-stdout_logfile=/var/log/snark_agent.log
-redirect_stderr=true
-environment=DATABASE_URL="postgresql://worker:password@localhost:5432/taskdb",REDIS_URL="redis://localhost:6379",S3_URL="http://localhost:9000",S3_BUCKET="workflow",S3_ACCESS_KEY="admin",S3_SECRET_KEY="password",RUST_LOG="info",RUST_BACKTRACE="1"
-startretries=3
 
 [program:rest_api]
 command=/app/rest_api --bind-addr 0.0.0.0:8081 --snark-timeout 180
@@ -380,6 +415,25 @@ echo "Prover主目录: /app"
 echo "日志目录: /var/log"
 echo "Broker配置文件路径: /app/broker*.toml"
 echo "Supervisord配置文件路径: /etc/supervisor/conf.d/boundless.conf"
+
+if [ "$SILENT_MODE" = true ]; then
+    echo
+    echo "=========================================="
+    echo "警告：使用了静默模式！"
+    echo "=========================================="
+    echo "已使用默认值："
+    echo "- GPU ID: 所有可用GPU"
+    echo "- 网络: 3 (Base Mainnet)"
+    echo "- RPC URLs: 占位符URL（需要更新）"
+    echo "- 私钥: 占位符私钥（需要更新）"
+    echo
+    echo "重要提醒：启动服务前请更新以下内容："
+    echo "1. 环境变量中的RPC URLs"
+    echo "2. 环境变量中的私钥"
+    echo "3. 检查 /etc/supervisor/conf.d/boundless.conf"
+    echo "=========================================="
+fi
+
 echo
 echo "基本命令: "
 echo "-----运行测试证明-----"
